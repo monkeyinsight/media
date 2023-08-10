@@ -73,8 +73,8 @@ pub async fn get_status(channel: String) -> Result<TwitchChannel, &'static str> 
                                 .send()
                                 .await
                                 .unwrap();
-                            println!("{} {}", channel, pic_status.status());
-                            if pic_status.status() != reqwest::StatusCode::OK {
+                            let re = Regex::new(r#"404_preview"#).unwrap();
+                            if pic_status.status() != reqwest::StatusCode::OK && re.captures(pic_status.headers().get("location").unwrap().to_str().unwrap()).is_some() {
                                 return Err("Offline");
                             }
 
