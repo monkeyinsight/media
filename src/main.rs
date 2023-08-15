@@ -1,9 +1,13 @@
 mod twitch;
 mod youtube;
 
-use actix_web::{get,post,delete,web,App,HttpServer,Responder,HttpResponse};
+use actix_web::{put,get,post,delete,web,App,HttpServer,Responder,HttpResponse,Error};
+use actix_multipart::Multipart;
+use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
-use std::fs::OpenOptions;
+use std::fs::{File,create_dir_all,OpenOptions};
+use walkdir::WalkDir;
+use std::io::Write;
 
 #[derive(Serialize, Deserialize)]
 struct ChannelObj {
@@ -96,6 +100,38 @@ async fn twitch_remove_controller(form: web::Json<ChannelObj>) -> HttpResponse {
     }
 }
 
+#[get("/files")]
+async fn list_controller() -> impl Responder {
+    let mut entries: Vec<String> = Vec::new();
+    for e in WalkDir::new("./files/").into_iter().filter_map(|e| e.ok()) {
+        if e.path().is_file() {
+            entries.push(e.path().to_str().unwrap().to_owned());
+        }
+    }
+
+    return serde_json::to_string(&entries);
+}
+
+
+#[put("/files")]
+pub async fn upload_controller(mut payload: Multipart) -> Result<HttpResponse, Error> {
+    while let Some(item) = payload.next().await {
+        let mut field = item.unwrap();
+        let content_type = field.content_disposition();
+
+        create_dir_all("./files/")?;
+        let file_path = format!("./files/{}", content_type.get_filename().unwrap());
+        let mut create_file = File::create(file_path).unwrap();
+
+        while let Some(chunk) = field.next().await {
+            let data = chunk.unwrap();
+            create_file.write_all(&data).unwrap();
+        }
+    }
+
+    Ok(HttpResponse::Ok().into())
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let _ = OpenOptions::new().write(true)
@@ -107,6 +143,8 @@ async fn main() -> std::io::Result<()> {
         .open("youtube.txt");
 
     HttpServer::new(|| App::new()
+        .service(list_controller)
+        .service(upload_controller)
         .service(youtube_controller)
         .service(youtube_add_controller)
         .service(youtube_remove_controller)
