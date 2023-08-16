@@ -1,7 +1,7 @@
 mod twitch;
 mod youtube;
 
-use actix_web::{put,get,post,delete,web,App,HttpServer,Responder,HttpResponse,Error};
+use actix_web::{put,get,post,delete,web,App,HttpServer,Responder,HttpResponse,Error,middleware};
 use actix_multipart::Multipart;
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
@@ -142,17 +142,18 @@ async fn main() -> std::io::Result<()> {
         .create_new(true)
         .open("youtube.txt");
 
-    HttpServer::new(|| App::new()
-        .service(list_controller)
-        .service(upload_controller)
-        .service(youtube_controller)
-        .service(youtube_add_controller)
-        .service(youtube_remove_controller)
-        .service(twitch_controller)
-        .service(twitch_add_controller)
-        .service(twitch_remove_controller)
-    )
-        .bind(("127.0.0.1", 8888))?
+    HttpServer::new(move || {
+        App::new()
+            .wrap(middleware::Logger::default())
+            .service(list_controller)
+            .service(upload_controller)
+            .service(youtube_controller)
+            .service(youtube_add_controller)
+            .service(youtube_remove_controller)
+            .service(twitch_controller)
+            .service(twitch_add_controller)
+            .service(twitch_remove_controller)
+    }).bind(("127.0.0.1", 8888))?
         .run()
         .await
 }
