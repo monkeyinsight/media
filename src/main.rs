@@ -1,7 +1,8 @@
 mod twitch;
 mod youtube;
 
-use actix_web::{put,get,post,delete,web,App,HttpServer,Responder,HttpResponse,Error,middleware};
+use actix_web::{put,get,post,delete,web,App,HttpServer,Responder,HttpResponse,Error,middleware,http,dev};
+use actix_web::middleware::{ErrorHandlerResponse, ErrorHandlers};
 use actix_multipart::Multipart;
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
@@ -105,7 +106,7 @@ async fn list_controller() -> impl Responder {
     let mut entries: Vec<String> = Vec::new();
     for e in WalkDir::new("./files/").into_iter().filter_map(|e| e.ok()) {
         if e.path().is_file() {
-            entries.push(e.path().to_str().unwrap().to_owned());
+            entries.push(e.path().to_str().unwrap().to_owned().replace("./files/", "/"));
         }
     }
 
@@ -132,6 +133,16 @@ pub async fn upload_controller(mut payload: Multipart) -> Result<HttpResponse, E
     Ok(HttpResponse::Ok().into())
 }
 
+fn add_error_header<B>(mut res: dev::ServiceResponse<B>) -> Result<ErrorHandlerResponse<B>, Error> {
+    res.response_mut().headers_mut().insert(
+        http::header::CONTENT_TYPE,
+        http::header::HeaderValue::from_static("Error"),
+    );
+
+    Ok(ErrorHandlerResponse::Response(res.map_into_left_body()))
+}
+
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let _ = OpenOptions::new().write(true)
@@ -145,6 +156,10 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
+            .wrap(
+                ErrorHandlers::new()
+                    .handler(http::StatusCode::INTERNAL_SERVER_ERROR, add_error_header),
+            )
             .service(list_controller)
             .service(upload_controller)
             .service(youtube_controller)
