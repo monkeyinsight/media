@@ -110,9 +110,9 @@ async fn list_controller() -> impl Responder {
         }
     }
 
+    entries.sort();
     return serde_json::to_string(&entries);
 }
-
 
 #[put("/files")]
 pub async fn upload_controller(mut payload: Multipart) -> Result<HttpResponse, Error> {
