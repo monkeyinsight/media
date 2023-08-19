@@ -114,7 +114,7 @@ async fn list_controller() -> impl Responder {
     let mut html = String::new();
     html.push_str("<!doctype html><html><head><style>body{display:flex;flex-wrap:wrap;}img{margin:10px;max-width:300px}</style></head><body>");
     for entry in entries {
-        html.push_str(&format!("<img src=\"/i{}\"/>", entry))
+        html.push_str(&format!("<a href=\"/i{}\"><img src=\"/i{}\"/></a>", entry))
     }
     html.push_str("</body></html>");
     return HttpResponse::Ok().body(html);
