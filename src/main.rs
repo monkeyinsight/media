@@ -110,7 +110,7 @@ async fn list_controller() -> impl Responder {
         }
     }
 
-    entries.sort();
+    entries.sort_by(|a,b| b.cmp(a));
     let mut html = String::new();
     html.push_str("<!doctype html><html><head><style>body{display:flex;flex-wrap:wrap;}img{margin:10px;max-width:300px}</style></head><body>");
     for entry in entries {
