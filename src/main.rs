@@ -199,10 +199,16 @@ where
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        let key = req.headers().get("Auth-token").unwrap().to_str().unwrap().to_owned();
-
         let mut authenticated: bool = match std::env::var("KEY") {
-            Ok(k) => k == key,
+            Ok(k) => {
+                match req.headers().get("Auth-token") {
+                    Some(t) => {
+                        let key = t.to_str().unwrap().to_owned();
+                        k == key
+                    },
+                    None => false
+                }
+            },
             Err(_) => true,
         };
 
