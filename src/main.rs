@@ -1,12 +1,27 @@
 mod twitch;
 mod youtube;
 
-use actix_web::{put,get,post,delete,web,App,HttpServer,Responder,HttpResponse,Error,middleware,http,dev};
+use dotenv::dotenv;
+use actix_web::{
+    put,get,post,delete,
+    web,
+    App,
+    HttpServer,
+    Responder,
+    HttpResponse,
+    Error,
+    middleware,
+    http::{header,StatusCode},
+    dev,
+    dev::{Service, Transform, ServiceRequest, ServiceResponse, forward_ready},
+    body::EitherBody,
+};
 use actix_web::middleware::{ErrorHandlerResponse, ErrorHandlers};
 use actix_multipart::Multipart;
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use std::fs::{File,create_dir_all,OpenOptions};
+use futures::future::{ok, LocalBoxFuture, Ready};
 use walkdir::WalkDir;
 use std::io::Write;
 
@@ -114,7 +129,7 @@ async fn list_controller() -> impl Responder {
     let mut html = String::new();
     html.push_str("<!doctype html><html><head><style>body{display:flex;flex-wrap:wrap;}img{margin:10px;max-width:300px}</style></head><body>");
     for entry in entries {
-        html.push_str(&format!("<a href=\"/i{}\"><img src=\"/i{}\"/></a>", entry))
+        html.push_str(&format!("<a href=\"/i{}\"><img src=\"/i{}\"/></a>", entry, entry))
     }
     html.push_str("</body></html>");
     return HttpResponse::Ok().body(html);
@@ -141,16 +156,75 @@ pub async fn upload_controller(mut payload: Multipart) -> Result<HttpResponse, E
 
 fn add_error_header<B>(mut res: dev::ServiceResponse<B>) -> Result<ErrorHandlerResponse<B>, Error> {
     res.response_mut().headers_mut().insert(
-        http::header::CONTENT_TYPE,
-        http::header::HeaderValue::from_static("Error"),
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("Error"),
     );
 
     Ok(ErrorHandlerResponse::Response(res.map_into_left_body()))
 }
 
+pub struct Authentication;
+
+impl<S, B> Transform<S, ServiceRequest> for Authentication
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S::Future: 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = AuthenticationMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ok(AuthenticationMiddleware { service })
+    }
+}
+
+pub struct AuthenticationMiddleware<S> {
+    service: S,
+}
+
+impl<S, B> Service<ServiceRequest> for AuthenticationMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S::Future: 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(service);
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let key = req.headers().get("Auth-token").unwrap().to_str().unwrap().to_owned();
+
+        let authenticated: bool = match std::env::var("KEY") {
+            Ok(k) => k == key,
+            Err(_) => true,
+        };
+
+        if !authenticated {
+            let (request, _pl) = req.into_parts();
+            let response = HttpResponse::Unauthorized()
+                .json(Response { success: false, error: Some("not authorized".to_owned()) })
+                .map_into_right_body();
+
+            return Box::pin(async { Ok(ServiceResponse::new(request, response)) });
+        }
+
+        let res = self.service.call(req);
+
+        Box::pin(async move { res.await.map(ServiceResponse::map_into_left_body) })
+    }
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    dotenv().ok();
+ 
     let _ = OpenOptions::new().write(true)
         .create_new(true)
         .open("twitch.txt");
@@ -164,8 +238,9 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .wrap(
                 ErrorHandlers::new()
-                    .handler(http::StatusCode::INTERNAL_SERVER_ERROR, add_error_header),
+                    .handler(StatusCode::INTERNAL_SERVER_ERROR, add_error_header),
             )
+            .wrap(Authentication)
             .service(list_controller)
             .service(upload_controller)
             .service(youtube_controller)
